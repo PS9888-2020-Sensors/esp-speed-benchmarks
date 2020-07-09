@@ -24,6 +24,17 @@ typedef struct {
     int len;
 } event_t;
 
+uint16_t tx = 0;
+uint32_t rx = 0;
+
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    if (status != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to tx");
+    }
+
+    tx --;
+}
+
 static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len) {
     if (IS_MASTER) {
         if (memcmp(mac_addr, MAC_SLAVE, 6) != 0) {
@@ -32,17 +43,14 @@ static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len
 
         static int i = 0;
         if (len == 4) {
-                printf("[%i] Slave received %d bytes in 1s\n", i++, *(uint32_t *) data);
+            printf("[%i] Slave received %d packets (%d) in 1s\n", i++, *(uint32_t *) data, (*(uint32_t *) data) * LEN_PACKET);
         }
     } else {
         if (memcmp(mac_addr, MAC_MASTER, 6) != 0) {
             return;
         }
 
-        event_t evt;
-        evt.len = len;
-
-        xQueueSend(data_recv_queue, &evt, portMAX_DELAY);
+        rx ++;
     }
 }
 
@@ -50,6 +58,7 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -70,33 +79,29 @@ static void espnow_task(void *pvParameter) {
         while(1) {
             int64_t start = esp_timer_get_time();
             while ((esp_timer_get_time() - start) < 3000000) {
+                if (tx > 8) continue;
+                
                 esp_now_send(MAC_SLAVE, data, LEN_PACKET);
-                vTaskDelay(100 / portTICK_RATE_MS);
+                tx ++;
             }
 
-            vTaskDelay(5000 / portTICK_RATE_MS);
+            vTaskDelay(10000 / portTICK_RATE_MS);
         }
     } else {
         ESP_LOGI(TAG, "Acting as slave");
-        event_t evt;
 
         uint16_t i = 0;
 
-        uint32_t recv_count = 0;
         int64_t last_trigger = esp_timer_get_time();
 
         while(1) {
-            if (xQueueReceive(data_recv_queue, &evt, 0) == pdTRUE) {
-                recv_count += evt.len;
-            }
-
             // every second
             if ((esp_timer_get_time() - last_trigger) > 1000000) {
-                if (recv_count > 0) {
-                    printf("[%d] Received %d bytes in the last 1s\n", i++, recv_count);
-                    esp_now_send(MAC_MASTER, (uint8_t *) &recv_count, sizeof(recv_count));
+                if (rx > 0) {
+                    printf("[%d] Received %d bytes in the last 1s\n", i++, rx * LEN_PACKET);
+                    esp_now_send(MAC_MASTER, (uint8_t *) &rx, sizeof(rx));
 
-                    recv_count = 0;
+                    rx = 0;
                     last_trigger = esp_timer_get_time();
                 }
             }
@@ -108,6 +113,7 @@ static void espnow_task(void *pvParameter) {
 
 static void espnow_init(void) {
     ESP_ERROR_CHECK(esp_now_init());
+    ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
     ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
 
     esp_now_peer_info_t peer;
