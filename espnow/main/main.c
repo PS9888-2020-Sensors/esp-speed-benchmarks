@@ -7,10 +7,12 @@
 #include "esp_now.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-
-#define IS_MASTER
+#include "driver/gpio.h"
 
 #define LEN_PACKET 250
+
+#define PIN_ROLE_ID 15
+uint8_t IS_MASTER = 1;
 
 static const uint8_t MAC_MASTER[6] = {0x12, 0x22, 0x30, 0x44, 0x55, 0xA5};
 static const uint8_t MAC_SLAVE[6] = {0x12, 0x22, 0x30, 0x44, 0x55, 0x5A};
@@ -23,28 +25,25 @@ typedef struct {
 } event_t;
 
 static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len) {
-    #ifndef IS_MASTER
-        event_t evt;
-        evt.len = len;
-    #endif
-
-    #ifdef IS_MASTER
+    if (IS_MASTER) {
         if (memcmp(mac_addr, MAC_SLAVE, 6) != 0) {
             return;
         }
-    #else
+
+        static int i = 0;
+        if (len == 4) {
+                printf("[%i] Slave received %d bytes in 1s\n", i++, *(uint32_t *) data);
+        }
+    } else {
         if (memcmp(mac_addr, MAC_MASTER, 6) != 0) {
             return;
         }
-    #endif
 
-    if (len == 4) {
-        printf("Slave received %d bytes in 1s\n", *(uint32_t *) data);
-    }
+        event_t evt;
+        evt.len = len;
 
-    #ifndef IS_MASTER
         xQueueSend(data_recv_queue, &evt, portMAX_DELAY);
-    #endif
+    }
 }
 
 static void wifi_init(void) {
@@ -58,7 +57,7 @@ static void wifi_init(void) {
 }
 
 static void espnow_task(void *pvParameter) {
-    #ifdef IS_MASTER
+    if (IS_MASTER) {
         ESP_LOGI(TAG, "Acting as master");
         uint8_t *data = malloc(LEN_PACKET);
 
@@ -77,7 +76,7 @@ static void espnow_task(void *pvParameter) {
 
             vTaskDelay(5000 / portTICK_RATE_MS);
         }
-    #else
+    } else {
         ESP_LOGI(TAG, "Acting as slave");
         event_t evt;
 
@@ -104,7 +103,7 @@ static void espnow_task(void *pvParameter) {
             
             vTaskDelay(10);
         }
-    #endif
+    }
 }
 
 static void espnow_init(void) {
@@ -116,11 +115,11 @@ static void espnow_init(void) {
     peer.ifidx = ESP_IF_WIFI_STA;
     peer.encrypt = false;
 
-    #ifdef IS_MASTER
+    if (IS_MASTER) {
         memcpy(peer.peer_addr, MAC_SLAVE, 6);
-    #else
+    } else {
         memcpy(peer.peer_addr, MAC_MASTER, 6);
-    #endif
+    }
 
     ESP_ERROR_CHECK(esp_now_add_peer(&peer));
 
@@ -137,16 +136,21 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    #ifdef IS_MASTER
-        esp_base_mac_addr_set(MAC_MASTER);
-    #else
-        esp_base_mac_addr_set(MAC_SLAVE);
-    #endif
+    gpio_set_direction(PIN_ROLE_ID, GPIO_MODE_INPUT);
+    gpio_pullup_en(PIN_ROLE_ID);
 
-    data_recv_queue = xQueueCreate(8, sizeof(event_t));
-    if (data_recv_queue == NULL) {
-        ESP_LOGE(TAG, "Create queue fail");
-        return;
+    IS_MASTER = gpio_get_level(PIN_ROLE_ID);
+
+    if (IS_MASTER) {
+        esp_base_mac_addr_set(MAC_MASTER);
+    } else {
+        esp_base_mac_addr_set(MAC_SLAVE);
+
+        data_recv_queue = xQueueCreate(75, sizeof(event_t));
+        if (data_recv_queue == NULL) {
+            ESP_LOGE(TAG, "Create queue fail");
+            return;
+        }
     }
 
     wifi_init();
