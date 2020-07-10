@@ -8,8 +8,12 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
+#include "esp_private/wifi.h"
 
 #define LEN_PACKET 250
+
+// https://github.com/espressif/esp-idf/blob/625bd5eb1806809ff3cc010ee20d1f750aa778a1/components/esp_wifi/include/esp_wifi_types.h#L474
+#define DATA_RATE WIFI_PHY_RATE_1M_L
 
 #define PIN_ROLE_ID 15
 uint8_t IS_MASTER = 1;
@@ -58,11 +62,14 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    cfg.ampdu_tx_enable = 0;
 
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_ERROR_CHECK(esp_wifi_internal_set_fix_rate(ESP_IF_WIFI_STA, true, DATA_RATE));
 }
 
 static void espnow_task(void *pvParameter) {
@@ -85,7 +92,7 @@ static void espnow_task(void *pvParameter) {
                 tx ++;
             }
 
-            vTaskDelay(10000 / portTICK_RATE_MS);
+            vTaskDelay(30000 / portTICK_RATE_MS);
         }
     } else {
         ESP_LOGI(TAG, "Acting as slave");
