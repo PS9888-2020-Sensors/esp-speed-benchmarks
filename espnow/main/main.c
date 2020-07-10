@@ -12,6 +12,9 @@
 
 #define LEN_PACKET 250
 
+// whether master broadcasts or sends directly to slave
+// #define TX_BROADCAST
+
 // https://github.com/espressif/esp-idf/blob/625bd5eb1806809ff3cc010ee20d1f750aa778a1/components/esp_wifi/include/esp_wifi_types.h#L474
 #define DATA_RATE WIFI_PHY_RATE_1M_L
 
@@ -20,6 +23,12 @@ uint8_t IS_MASTER = 1;
 
 static const uint8_t MAC_MASTER[6] = {0x12, 0x22, 0x30, 0x44, 0x55, 0xA5};
 static const uint8_t MAC_SLAVE[6] = {0x12, 0x22, 0x30, 0x44, 0x55, 0x5A};
+
+#ifdef TX_BROADCAST
+    static const uint8_t MAC_BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+#endif
+
+static const char *PACKET_HEADER = "HDR";
 
 static xQueueHandle data_recv_queue;
 static const char *TAG = "espnow_benchmark";
@@ -50,7 +59,7 @@ static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len
             printf("[%i] Slave received %d packets (%d) in 1s\n", i++, *(uint32_t *) data, (*(uint32_t *) data) * LEN_PACKET);
         }
     } else {
-        if (memcmp(mac_addr, MAC_MASTER, 6) != 0) {
+        if (memcmp(PACKET_HEADER, data, strlen(PACKET_HEADER)) != 0) {
             return;
         }
 
@@ -69,6 +78,12 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    uint8_t primary_channel;
+    wifi_second_chan_t second_channel;
+    ESP_ERROR_CHECK(esp_wifi_get_channel(&primary_channel, &second_channel));
+
+    printf("Transmitting on channel %d\n", primary_channel);
+
     ESP_ERROR_CHECK(esp_wifi_internal_set_fix_rate(ESP_IF_WIFI_STA, true, DATA_RATE));
 }
 
@@ -83,12 +98,17 @@ static void espnow_task(void *pvParameter) {
         }
 
         esp_fill_random(data, LEN_PACKET);
+        memcpy(data, PACKET_HEADER, strlen(PACKET_HEADER));
         while(1) {
             int64_t start = esp_timer_get_time();
             while ((esp_timer_get_time() - start) < 3000000) {
                 if (tx > 8) continue;
                 
-                esp_now_send(MAC_SLAVE, data, LEN_PACKET);
+                #ifdef TX_BROADCAST
+                    esp_now_send(MAC_BROADCAST, data, LEN_PACKET);
+                #else
+                    esp_now_send(MAC_SLAVE, data, LEN_PACKET);
+                #endif
                 tx ++;
             }
 
@@ -129,7 +149,11 @@ static void espnow_init(void) {
     peer.encrypt = false;
 
     if (IS_MASTER) {
-        memcpy(peer.peer_addr, MAC_SLAVE, 6);
+        #ifdef TX_BROADCAST
+            memcpy(peer.peer_addr, MAC_BROADCAST, 6);
+        #else
+            memcpy(peer.peer_addr, MAC_SLAVE, 6);
+        #endif
     } else {
         memcpy(peer.peer_addr, MAC_MASTER, 6);
     }
