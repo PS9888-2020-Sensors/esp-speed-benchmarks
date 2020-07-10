@@ -47,7 +47,7 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
         ESP_LOGW(TAG, "Failed to tx");
     }
 
-    tx --;
+    if (tx > 0) tx --;
 }
 
 static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len) {
