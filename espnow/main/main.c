@@ -56,9 +56,8 @@ static void espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len
             return;
         }
 
-        static int i = 0;
         if (len == 4) {
-            printf("[%i] Slave received %d packets (%d) in 1s\n", i++, *(uint32_t *) data, (*(uint32_t *) data) * LEN_PACKET);
+            ESP_LOGI(TAG, "Slave received %d packets (%d) in 1s", *(uint32_t *) data, (*(uint32_t *) data) * LEN_PACKET);
         }
     } else {
         if (memcmp(PACKET_HEADER, data, strlen(PACKET_HEADER)) != 0) {
@@ -86,7 +85,7 @@ static void wifi_init(void) {
     wifi_second_chan_t second_channel;
     ESP_ERROR_CHECK(esp_wifi_get_channel(&primary_channel, &second_channel));
 
-    printf("Transmitting on channel %d\n", primary_channel);
+    ESP_LOGI(TAG, "Transmitting on channel %d", primary_channel);
 
     ESP_ERROR_CHECK(esp_wifi_internal_set_fix_rate(ESP_IF_WIFI_STA, true, DATA_RATE));
 }
@@ -121,15 +120,13 @@ static void espnow_task(void *pvParameter) {
     } else {
         ESP_LOGI(TAG, "Acting as slave");
 
-        uint16_t i = 0;
-
         int64_t last_trigger = esp_timer_get_time();
 
         while(1) {
             // every second
             if ((esp_timer_get_time() - last_trigger) > 1000000) {
                 if (rx > 0) {
-                    printf("[%d] Received %d bytes in the last 1s\n", i++, rx * LEN_PACKET);
+                    ESP_LOGI(TAG, "Received %d bytes in the last 1s", rx * LEN_PACKET);
                     esp_now_send(MAC_MASTER, (uint8_t *) &rx, sizeof(rx));
 
                     rx = 0;
