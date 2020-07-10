@@ -15,6 +15,8 @@
 // whether master broadcasts or sends directly to slave
 // #define TX_BROADCAST
 
+#define WIFI_CHANNEL 11
+
 // https://github.com/espressif/esp-idf/blob/625bd5eb1806809ff3cc010ee20d1f750aa778a1/components/esp_wifi/include/esp_wifi_types.h#L474
 #define DATA_RATE WIFI_PHY_RATE_1M_L
 
@@ -77,6 +79,8 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_ERROR_CHECK(esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE));
 
     uint8_t primary_channel;
     wifi_second_chan_t second_channel;
@@ -145,6 +149,7 @@ static void espnow_init(void) {
 
     esp_now_peer_info_t peer;
     memset(&peer, 0, sizeof(esp_now_peer_info_t));
+    peer.channel = WIFI_CHANNEL;
     peer.ifidx = ESP_IF_WIFI_STA;
     peer.encrypt = false;
 
